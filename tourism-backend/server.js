@@ -9,6 +9,8 @@ const destinationRoutes=require("./routes/destinationRoutes")
 const reviewRoutes=require("./routes/reviewRoutes")
 const bookmarksRoutes=require("./routes/bookmarkRoutes")
 const recommendationRoutes=require("./routes/recommendationRoutes")
+const paymentRoutes=require("./routes/paymentRoutes")
+const bookingRoutes=require("./routes/bookingRoutes")
 
 const app = express();
 
@@ -23,6 +25,9 @@ app.use("/api/destinations",destinationRoutes)
 app.use("/api/reviews",reviewRoutes)
 app.use("/api/bookmarks",bookmarksRoutes)
 app.use("/api/recommendations",recommendationRoutes)
+app.use("/api/payments",paymentRoutes)
+app.use("/api/payment",paymentRoutes)
+app.use("/api/bookings",bookingRoutes)
 
 app.get("/", (req, res) => {
     res.json({

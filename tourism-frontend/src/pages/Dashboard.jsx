@@ -4,6 +4,7 @@ import AfterLoginNavbar from "../components/AfterLoginNavbar";
 import {getBookmarks,removeBookmark,} from "../services/bookmarkServices";
 import { getMyReviews } from "../services/dashboardService";
 import { toast } from "react-toastify";
+import UpcomingJourney from "./UpcomingJourney";
 
 function Dashboard() {
  
@@ -175,7 +176,9 @@ useEffect(() => {
 
           </div>
         </section>
-
+         <div className="mb-10">
+          <UpcomingJourney/>
+         </div>
         
         <section className="mb-10 grid grid-cols-1 gap-6 lg:grid-cols-5">
 

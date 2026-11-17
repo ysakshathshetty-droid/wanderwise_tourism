@@ -1,536 +1,868 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import AfterLoginNavbar from "../components/AfterLoginNavbar";
-import { getRecommendations } from "../services/recommendationService";
 
-const categories = [
-    { name: "Nature", icon: "🌿" },
-    { name: "Historical", icon: "🏛️" },
-    { name: "Beach", icon: "🏖️" },
-    { name: "Mountains", icon: "⛰️" },
-    { name: "Wildlife", icon: "🐘" },
-];
+const API_URL = "http://localhost:5000/api";
+
+// --------------------------------------------------
+// FORMAT CURRENCY
+// --------------------------------------------------
+
+const formatPrice = (value) => {
+
+    const number = Number(value);
+
+    if (!Number.isFinite(number)) {
+        return "₹0";
+    }
+
+    return `₹${Math.round(number).toLocaleString("en-IN")}`;
+};
+
+// --------------------------------------------------
+// CALCULATE INCLUSIVE DAYS
+// --------------------------------------------------
+
+const calculateDays = (departure, returning) => {
+
+    if (!departure || !returning) return 0;
+
+    const start = new Date(`${departure}T00:00:00`);
+    const end = new Date(`${returning}T00:00:00`);
+
+    const difference =
+        Math.round((end - start) / (1000 * 60 * 60 * 24));
+
+    return difference ;
+};
+
+// --------------------------------------------------
+// MAIN COMPONENT
+// --------------------------------------------------
 
 function Recommendations() {
-    const [selectedCategories, setSelectedCategories] = useState(["Nature"]);
-    const [budget, setBudget] = useState(25000);
-    const [minRating, setMinRating] = useState(4);
-    const [recommendations, setRecommendations] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [searched, setSearched] = useState(false);
-    const [error, setError] = useState("");
 
-    
-    const toggleCategory = (category) => {
-        setSelectedCategories((previous) =>
-            previous.includes(category)
-                ? previous.filter((item) => item !== category)
-                : [...previous, category]
-        );
+    const navigate = useNavigate();
+
+    const today = new Date();
+
+    const localToday = [
+        today.getFullYear(),
+        String(today.getMonth() + 1).padStart(2, "0"),
+        String(today.getDate()).padStart(2, "0")
+    ].join("-");
+
+    const [region, setRegion] = useState("");
+
+    const [departureDate, setDepartureDate] =
+        useState(localToday);
+
+    const [returnDate, setReturnDate] =
+        useState("");
+
+    const [minRating, setMinRating] =
+        useState("3");
+
+    const [travellers, setTravellers] =
+        useState(1);
+
+    const [recommendations, setRecommendations] =
+        useState([]);
+
+    const [itinerary, setItinerary] =
+        useState([]);
+
+    const [packageDetails, setPackageDetails] =
+        useState(null);
+
+    const [tripInfo, setTripInfo] =
+        useState(null);
+
+    const [loading, setLoading] =
+        useState(false);
+
+    const [error, setError] =
+        useState("");
+
+    // --------------------------------------------------
+    // CLEAR OLD RESULTS
+    // --------------------------------------------------
+
+    const clearResults = () => {
+
+        setRecommendations([]);
+        setItinerary([]);
+        setPackageDetails(null);
+        setTripInfo(null);
+        setError("");
     };
 
-    
-    const getMatchDetails = (destination) => {
-        let score = 0;
-        const reasons = [];
+    // --------------------------------------------------
+    // HANDLE FORM SUBMISSION
+    // --------------------------------------------------
 
-        const type = destination.type;
-        const destinationBudget = Number(destination.budget);
-        const rating = Number(destination.average_rating);
+    const handleSubmit = async (e) => {
 
-        
-        if (selectedCategories.includes(type)) {
-            score += 50;
-            reasons.push(`Matches your interest in ${type}`);
-        }
+        e.preventDefault();
 
-        
-        if (destinationBudget <= budget) {
-            score += 30;
-            reasons.push("Within your selected budget");
-        } else {
-            reasons.push("Exceeds your selected budget");
-        }
+        clearResults();
 
-        
-        if (rating >= minRating) {
-            score += 20;
-            reasons.push("Meets your minimum rating");
-        } else {
-            reasons.push("Below your preferred rating");
-        }
+        const trimmedRegion = region.trim();
 
-        return { score, reasons };
-    };
-
-    
-    const findRecommendations = async (event) => {
-        event.preventDefault();
-
-        if (selectedCategories.length === 0) {
-            setError("Please select at least one interest.");
+        if (!trimmedRegion) {
+            setError("Please enter a destination region or district.");
             return;
         }
 
-        setLoading(true);
-        setError("");
-        setSearched(true);
-        setRecommendations([]);
+        if (!departureDate || !returnDate) {
+            setError("Please select both travel dates.");
+            return;
+        }
+
+        if (returnDate < departureDate) {
+            setError("Return date cannot be before departure date.");
+            return;
+        }
+
+        if (Number(travellers) < 1) {
+            setError("Please enter at least one traveller.");
+            return;
+        }
+
+        const tripDays = calculateDays(
+            departureDate,
+            returnDate
+        );
+
+        if (tripDays > 30) {
+            setError("Maximum trip duration is 30 days.");
+            return;
+        }
 
         try {
-            const results = await getRecommendations({
-                categories: selectedCategories,
-                budget: Number(budget),
-                minRating: Number(minRating),
-            });
+
+            setLoading(true);
+
+            const token = localStorage.getItem("token");
+
+            if (!token) {
+                throw new Error("Please log in to continue.");
+            }
+
+            const response = await fetch(
+                `${API_URL}/recommendations`,
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`
+                    },
+
+                    body: JSON.stringify({
+
+                        // Both names are sent for compatibility
+                        region: trimmedRegion,
+                        destination: trimmedRegion,
+
+                        departureDate,
+                        returnDate,
+
+                        days: tripDays,
+
+                        minRating: Number(minRating),
+
+                        travellers: Number(travellers)
+
+                    })
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok || !data.success) {
+                throw new Error(
+                    data.message || "Unable to fetch recommendations."
+                );
+            }
+
+            // ------------------------------------------
+            // VALIDATE BACKEND PACKAGE
+            // ------------------------------------------
+
+            const pkg = data.package;
+
+            if (!pkg || typeof pkg !== "object") {
+                throw new Error("Package details were not received from the server.");
+            }
+
+            const requiredFields = [
+                "bengaluruTravelCost",
+                "localTransportCost",
+                "foodCost",
+                "accommodationCost",
+                "subtotal",
+                "contingency",
+                "total",
+                "perPersonTotal"
+            ];
+
+            const invalidFields = requiredFields.filter(
+                (field) =>
+                    pkg[field] === null ||
+                    pkg[field] === undefined ||
+                    !Number.isFinite(Number(pkg[field]))
+            );
+
+            if (invalidFields.length > 0) {
+                console.error("Invalid package received:", pkg);
+
+                throw new Error(
+                    `Invalid package fields: ${invalidFields.join(", ")}`
+                );
+            }
+
+            // ------------------------------------------
+            // SAVE RESULTS
+            // ------------------------------------------
 
             setRecommendations(
-                Array.isArray(results) ? results : []
+                Array.isArray(data.recommendations)
+                    ? data.recommendations
+                    : []
             );
+
+            setItinerary(
+                Array.isArray(data.itinerary)
+                    ? data.itinerary
+                    : []
+            );
+
+            setPackageDetails(pkg);
+
+            setTripInfo({
+                destination: data.destination,
+                startingLocation: data.startingLocation,
+                departureDate: data.departureDate,
+                returnDate: data.returnDate,
+                days: data.days,
+                nights: pkg.nights,
+                travellers: data.travellers,
+                totalAvailablePlaces: data.totalAvailablePlaces,
+                selectedPlacesCount: data.selectedPlacesCount
+            });
+
         } catch (err) {
-            setError(
-                err.message || "Failed to fetch recommendations."
-            );
+
+            console.error("Recommendation error:", err);
+
+            setError(err.message || "Something went wrong.");
+
         } finally {
+
             setLoading(false);
+
         }
     };
 
+    // --------------------------------------------------
+    // BOOK COMPLETE TRIP
+    // --------------------------------------------------
+
+    const handleBooking = () => {
+
+        if (!packageDetails || !tripInfo) {
+            setError("Please generate your recommendations first.");
+            return;
+        }
+
+        navigate("/payment", {
+
+            state: {
+
+                destination: tripInfo.destination,
+
+                startingLocation: "Bengaluru",
+
+                departureDate: tripInfo.departureDate,
+
+                returnDate: tripInfo.returnDate,
+
+                days: tripInfo.days,
+
+                nights: tripInfo.nights,
+
+                travellers: tripInfo.travellers,
+
+                minRating: Number(minRating),
+
+                destinations: recommendations,
+
+                itinerary,
+
+                package: packageDetails,
+
+                estimatedAmount: packageDetails.total
+
+            }
+
+        });
+    };
+
+    // --------------------------------------------------
+    // UI
+    // --------------------------------------------------
+
     return (
-        <div className="min-h-screen bg-[#faf9f6]">
+
+        <div className="min-h-screen bg-slate-50">
+
             <AfterLoginNavbar />
 
-            
-            <section className="px-4 pb-8 pt-10 sm:px-6 sm:pt-14">
-                <div className="mx-auto max-w-4xl text-center">
-                    <span className="inline-flex items-center gap-2 rounded-full border border-[#D5E3D5] bg-[#E8F0E8] px-4 py-2 text-sm font-medium text-emerald-900">
-                        ✨ Your personalized travel guide
-                    </span>
+            <div className="max-w-7xl mx-auto px-4 py-10">
 
-                    <h1 className="mt-5 text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl lg:text-5xl">
-                        Find Your Perfect{" "}
-                        <span className="text-emerald-800">
-                            Destination
-                        </span>
+                {/* HEADER */}
+
+                <div className="text-center mb-10">
+
+                    <p className="text-blue-600 font-semibold tracking-wide uppercase text-sm">
+                        WanderWise Travel Planner
+                    </p>
+
+                    <h1 className="text-3xl md:text-4xl font-bold text-slate-800 mt-3">
+                        Discover Your Next Journey
                     </h1>
 
-                    <p className="mx-auto mt-4 max-w-2xl text-sm leading-6 text-gray-600 sm:text-base">
-                        Tell us what you love, choose your budget,
-                        and discover destinations that match your
-                        travel preferences.
+                    <p className="text-slate-500 mt-3 max-w-2xl mx-auto">
+                        Enter your preferred destination region and travel
+                        dates. We will recommend nearby attractions and
+                        calculate one complete trip package for you.
                     </p>
+
                 </div>
-            </section>
 
-            
-            <section className="px-4 pb-12 sm:px-6">
-                <div className="mx-auto max-w-3xl overflow-hidden rounded-3xl border border-[#D5E3D5] bg-white shadow-sm">
-                    <div className="border-b border-gray-100 px-5 py-5 sm:px-8">
-                        <h2 className="text-xl font-bold text-gray-900">
-                            Plan Your Next Adventure
-                        </h2>
+                {/* FIXED STARTING POINT */}
 
-                        <p className="mt-1 text-sm text-gray-500">
-                            Customize your preferences below.
-                        </p>
+                <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5 mb-7">
+
+                    <div className="flex items-center gap-3">
+
+                        <div className="bg-blue-600 text-white rounded-full w-11 h-11 flex items-center justify-center text-xl">
+                            📍
+                        </div>
+
+                        <div>
+
+                            <p className="text-sm text-blue-700 font-medium">
+                                Your fixed starting and ending point
+                            </p>
+
+                            <h2 className="text-xl font-bold text-slate-800">
+                                Bengaluru
+                            </h2>
+
+                        </div>
+
                     </div>
 
-                    <form
-                        onSubmit={findRecommendations}
-                        className="space-y-8 p-5 sm:p-8"
-                    >
-                        
-                        <div>
-                            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                                <label className="font-semibold text-gray-800">
-                                    What interests you?
+                    <p className="text-sm text-slate-600 mt-3">
+                        Your journey will always start and end in Bengaluru.
+                        Round-trip travel expenses are calculated once for
+                        the entire package.
+                    </p>
+
+                </div>
+
+                {/* FORM */}
+
+                <div className="bg-white rounded-3xl shadow-lg border border-slate-100 p-6 md:p-9 mb-10">
+
+                    <h2 className="text-2xl font-bold text-slate-800 mb-2">
+                        Plan Your Journey
+                    </h2>
+
+                    <p className="text-slate-500 mb-7">
+                        Enter your travel preferences below.
+                    </p>
+
+                    <form onSubmit={handleSubmit}>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                            {/* REGION */}
+
+                            <div className="md:col-span-2">
+
+                                <label className="block font-semibold text-slate-700 mb-2">
+                                    Destination Region / District
                                 </label>
 
-                                <span className="text-xs text-gray-500">
-                                    Select one or more
-                                </span>
+                                <input
+                                    type="text"
+                                    value={region}
+                                    onChange={(e) => {
+                                        setRegion(e.target.value);
+                                        clearResults();
+                                    }}
+                                    placeholder="Example: Udupi, Kodagu, Mysuru, Chikkamagaluru"
+                                    className="w-full border border-slate-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    required
+                                />
+
+                                <p className="text-sm text-slate-400 mt-2">
+                                    Enter a district or region. We will find
+                                    matching tourist places from our database.
+                                </p>
+
                             </div>
 
-                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                                {categories.map((category) => {
-                                    const selected =
-                                        selectedCategories.includes(
-                                            category.name
-                                        );
+                            {/* DEPARTURE */}
 
-                                    return (
-                                        <button
-                                            key={category.name}
-                                            type="button"
-                                            onClick={() =>
-                                                toggleCategory(
-                                                    category.name
-                                                )
-                                            }
-                                            aria-pressed={selected}
-                                            className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-4 text-sm font-medium transition duration-200 ${
-                                                selected
-                                                    ? "border-emerald-800 bg-emerald-800 text-white shadow-sm"
-                                                    : "border-gray-200 bg-white text-gray-700 hover:border-emerald-600 hover:bg-emerald-50"
-                                            }`}
-                                        >
-                                            <span className="text-xl">
-                                                {category.icon}
-                                            </span>
+                            <div>
 
-                                            {category.name}
+                                <label className="block font-semibold text-slate-700 mb-2">
+                                    Departure Date
+                                </label>
 
-                                            {selected && (
-                                                <span>✓</span>
-                                            )}
-                                        </button>
-                                    );
-                                })}
+                                <input
+                                    type="date"
+                                    min={localToday}
+                                    value={departureDate}
+                                    onChange={(e) => {
+                                        setDepartureDate(e.target.value);
+                                        clearResults();
+                                    }}
+                                    className="w-full border border-slate-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+                                    required
+                                />
+
                             </div>
-                        </div>
 
-                        
-                        <div>
-                            <div className="mb-4 flex items-center justify-between gap-3">
-                                <label
-                                    htmlFor="budget"
-                                    className="font-semibold text-gray-800"
+                            {/* RETURN */}
+
+                            <div>
+
+                                <label className="block font-semibold text-slate-700 mb-2">
+                                    Return Date
+                                </label>
+
+                                <input
+                                    type="date"
+                                    min={departureDate || localToday}
+                                    value={returnDate}
+                                    onChange={(e) => {
+                                        setReturnDate(e.target.value);
+                                        clearResults();
+                                    }}
+                                    className="w-full border border-slate-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+                                    required
+                                />
+
+                            </div>
+
+                            {/* RATING */}
+
+                            <div>
+
+                                <label className="block font-semibold text-slate-700 mb-2">
+                                    Minimum Destination Rating
+                                </label>
+
+                                <select
+                                    value={minRating}
+                                    onChange={(e) => {
+                                        setMinRating(e.target.value);
+                                        clearResults();
+                                    }}
+                                    className="w-full border border-slate-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
                                 >
-                                    Maximum budget
+
+                                    <option value="0">All Ratings</option>
+                                    <option value="2">2.0 and above</option>
+                                    <option value="3">3.0 and above</option>
+                                    <option value="4">4.0 and above</option>
+                                    <option value="4.5">4.5 and above</option>
+
+                                </select>
+
+                            </div>
+
+                            {/* TRAVELLERS */}
+
+                            <div>
+
+                                <label className="block font-semibold text-slate-700 mb-2">
+                                    Number of Travellers
                                 </label>
 
-                                <span className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900">
-                                    ₹{budget.toLocaleString("en-IN")}
-                                </span>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="20"
+                                    value={travellers}
+                                    onChange={(e) => {
+                                        setTravellers(e.target.value);
+                                        clearResults();
+                                    }}
+                                    className="w-full border border-slate-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+                                    required
+                                />
+
                             </div>
 
-                            <input
-                                id="budget"
-                                type="range"
-                                min="1000"
-                                max="50000"
-                                step="500"
-                                value={budget}
-                                onChange={(event) =>
-                                    setBudget(
-                                        Number(event.target.value)
-                                    )
-                                }
-                                className="w-full cursor-pointer accent-emerald-800"
-                            />
-
-                            <div className="mt-2 flex justify-between text-xs text-gray-500">
-                                <span>₹1,000</span>
-                                <span>₹50,000</span>
-                            </div>
-
-                            <p className="mt-2 text-xs text-gray-500">
-                                Compare destinations using their estimated
-                                budgets.
-                            </p>
                         </div>
 
-                    
-                        <div>
-                            <label
-                                htmlFor="rating"
-                                className="mb-3 block font-semibold text-gray-800"
-                            >
-                                Minimum destination rating
-                            </label>
+                        {/* SUBMIT */}
 
-                            <select
-                                id="rating"
-                                value={minRating}
-                                onChange={(event) =>
-                                    setMinRating(
-                                        Number(event.target.value)
-                                    )
-                                }
-                                className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-100"
-                            >
-                                <option value={3}>
-                                    3.0 and above
-                                </option>
-                                <option value={3.5}>
-                                    3.5 and above
-                                </option>
-                                <option value={4}>
-                                    4.0 and above
-                                </option>
-                                <option value={4.5}>
-                                    4.5 and above
-                                </option>
-                                <option value={5}>
-                                    5.0 only
-                                </option>
-                            </select>
-                        </div>
-
-                        
-                        {error && (
-                            <div
-                                role="alert"
-                                className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
-                            >
-                                {error}
-                            </div>
-                        )}
-
-                    
                         <button
                             type="submit"
                             disabled={loading}
-                            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-800 px-5 py-4 font-semibold text-white shadow-sm transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="w-full mt-8 bg-gradient-to-r from-blue-600 to-indigo-700 text-white font-bold py-4 rounded-xl hover:from-blue-700 hover:to-indigo-800 transition duration-200 disabled:opacity-60"
                         >
-                            {loading ? (
-                                <>
-                                    <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                                    Finding destinations...
-                                </>
-                            ) : (
-                                <>✨ Find Recommendations</>
-                            )}
+
+                            {loading
+                                ? "Finding Your Destinations..."
+                                : "Explore Recommendations →"}
+
                         </button>
+
                     </form>
-                </div>
-            </section>
 
-        
-            {loading && (
-                <div className="px-4 pb-12 text-center">
-                    <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-emerald-100 border-t-emerald-800" />
+                    {/* ERROR */}
 
-                    <p className="mt-4 text-sm text-gray-600">
-                        Finding destinations for you...
-                    </p>
-                </div>
-            )}
+                    {error && (
 
-            
-            {searched && !loading && !error && (
-                <section className="px-4 pb-16 sm:px-6 lg:px-8">
-                    <div className="mx-auto max-w-6xl">
-                        <div className="mb-7">
-                            <h2 className="text-2xl font-bold text-gray-900 sm:text-3xl">
-                                Your Recommendations
-                            </h2>
-
-                            <p className="mt-2 text-sm text-gray-600">
-                                Discover destinations selected for your
-                                travel preferences.
-                            </p>
-
-                            {recommendations.length > 0 && (
-                                <p className="mt-2 text-sm font-medium text-emerald-800">
-                                    {recommendations.length} destinations found
-                                </p>
-                            )}
+                        <div className="mt-5 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl">
+                            {error}
                         </div>
 
-                        {recommendations.length === 0 ? (
-                            <div className="rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
-                                <div className="text-5xl">🧭</div>
+                    )}
 
-                                <h3 className="mt-4 text-lg font-bold text-gray-800">
-                                    No destinations found
-                                </h3>
+                </div>
 
-                                <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-gray-500">
-                                    Try selecting more interests, increasing
-                                    your budget, or lowering your minimum
-                                    rating.
-                                </p>
+                {/* RESULTS */}
+
+                {packageDetails && tripInfo && (
+
+                    <div className="space-y-8">
+
+                        {/* TRIP SUMMARY */}
+
+                        <div className="bg-white rounded-3xl shadow-md p-6 md:p-8">
+
+                            <h2 className="text-2xl font-bold text-slate-800 mb-5">
+                                Your Trip Summary
+                            </h2>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+
+                                <div className="bg-blue-50 p-5 rounded-2xl">
+                                    <p className="text-sm text-slate-500">
+                                        Destination
+                                    </p>
+
+                                    <h3 className="font-bold text-lg mt-1">
+                                        {tripInfo.destination}
+                                    </h3>
+                                </div>
+
+                                <div className="bg-indigo-50 p-5 rounded-2xl">
+                                    <p className="text-sm text-slate-500">
+                                        Total Days
+                                    </p>
+
+                                    <h3 className="font-bold text-lg mt-1">
+                                        {tripInfo.days} Days
+                                    </h3>
+                                </div>
+
+                                <div className="bg-green-50 p-5 rounded-2xl">
+                                    <p className="text-sm text-slate-500">
+                                        Travellers
+                                    </p>
+
+                                    <h3 className="font-bold text-lg mt-1">
+                                        {tripInfo.travellers}
+                                    </h3>
+                                </div>
+
+                                <div className="bg-orange-50 p-5 rounded-2xl">
+                                    <p className="text-sm text-slate-500">
+                                        Attractions Selected
+                                    </p>
+
+                                    <h3 className="font-bold text-lg mt-1">
+                                        {tripInfo.selectedPlacesCount}
+                                    </h3>
+                                </div>
+
                             </div>
-                        ) : (
-                            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
-                                {recommendations.map((destination) => {
-                                    const {
-                                        score,
-                                        reasons,
-                                    } = getMatchDetails(destination);
 
-                                    const destinationId =
-                                        destination.destination_id ??
-                                        destination.id;
+                        </div>
 
-                                    return (
-                                        <article
-                                            key={destinationId}
-                                            className="overflow-hidden rounded-2xl border border-[#D5E3D5] bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-lg"
-                                        >
-                                            
-                                            <div className="relative h-52 bg-gray-100">
-                                                {destination.image_url ? (
-                                                    <img
-                                                        src={destination.image_url}
-                                                        alt={destination.name}
-                                                        loading="lazy"
-                                                        className="h-full w-full object-cover"
-                                                    />
-                                                ) : (
-                                                    <div className="flex h-full items-center justify-center text-5xl">
-                                                        🌍
-                                                    </div>
-                                                )}
+                        {/* RECOMMENDATIONS */}
 
-                                                <span className="absolute left-3 top-3 rounded-full bg-white/95 px-3 py-1.5 text-xs font-semibold text-emerald-900 shadow-sm">
-                                                    {destination.type}
-                                                </span>
+                        <div className="bg-white rounded-3xl shadow-md p-6 md:p-8">
 
-                                                <span className="absolute right-3 top-3 rounded-full bg-emerald-800 px-3 py-1.5 text-sm font-bold text-white shadow-sm">
-                                                    {score}% Match
-                                                </span>
-                                            </div>
+                            <h2 className="text-2xl font-bold text-slate-800 mb-6">
+                                Recommended Destinations
+                            </h2>
 
-                                            
-                                            <div className="p-5">
-                                                <div className="flex items-start justify-between gap-3">
-                                                    <div className="min-w-0">
-                                                        <h3 className="text-xl font-bold text-gray-900">
-                                                            {destination.name}
-                                                        </h3>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
 
-                                                        <p className="mt-1 text-sm text-gray-500">
-                                                            📍{" "}
-                                                            {destination.location}
-                                                        </p>
-                                                    </div>
+                                {recommendations.map((place) => (
 
-                                                    <span className="shrink-0 rounded-lg bg-amber-50 px-2.5 py-1.5 text-sm font-semibold text-amber-800">
-                                                        ⭐{" "}
-                                                        {Number(
-                                                            destination.average_rating
-                                                        ).toFixed(1)}
-                                                    </span>
-                                                </div>
+                                    <div
+                                        key={place.destination_id}
+                                        className="border border-slate-200 rounded-2xl overflow-hidden hover:shadow-lg transition"
+                                    >
 
-                                                
-                                                <div className="mt-5">
-                                                    <div className="mb-2 flex items-center justify-between text-sm">
-                                                        <span className="font-medium text-gray-600">
-                                                            Preference match
-                                                        </span>
+                                        {place.image_url && (
 
-                                                        <span className="font-bold text-emerald-800">
-                                                            {score}%
-                                                        </span>
-                                                    </div>
+                                            <img
+                                                src={place.image_url}
+                                                alt={place.name}
+                                                className="w-full h-48 object-cover"
+                                            />
+
+                                        )}
+
+                                        <div className="p-5">
+
+                                            <h3 className="font-bold text-lg text-slate-800">
+                                                {place.name}
+                                            </h3>
+
+                                            <p className="text-sm text-slate-500 mt-1">
+                                                📍 {place.location}
+                                            </p>
+
+                                            <p className="text-sm text-slate-500 mt-2">
+                                                {place.type}
+                                            </p>
+
+                                            <p className="text-yellow-600 font-semibold mt-3">
+                                                ★ {Number(place.average_rating || 0).toFixed(1)}
+                                            </p>
+
+                                            <p className="text-slate-600 text-sm mt-3">
+                                                {place.description}
+                                            </p>
+
+                                        </div>
+
+                                    </div>
+
+                                ))}
+
+                            </div>
+
+                        </div>
+
+                        {/* ITINERARY */}
+
+                        <div className="bg-white rounded-3xl shadow-md p-6 md:p-8">
+
+                            <h2 className="text-2xl font-bold text-slate-800 mb-6">
+                                Your Day-wise Itinerary
+                            </h2>
+
+                            <div className="space-y-5">
+
+                                {itinerary.map((day) => (
+
+                                    <div
+                                        key={day.day}
+                                        className="border border-slate-200 rounded-2xl p-5"
+                                    >
+
+                                        <h3 className="text-xl font-bold text-blue-700 mb-4">
+                                            Day {day.day}
+                                        </h3>
+
+                                        {day.places.length > 0 ? (
+
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+                                                {day.places.map((place) => (
 
                                                     <div
-                                                        className="h-2.5 overflow-hidden rounded-full bg-gray-100"
-                                                        role="progressbar"
-                                                        aria-valuenow={score}
-                                                        aria-valuemin={0}
-                                                        aria-valuemax={100}
-                                                        aria-label={`${score}% preference match`}
+                                                        key={place.destination_id}
+                                                        className="bg-slate-50 p-4 rounded-xl"
                                                     >
-                                                        <div
-                                                            className="h-full rounded-full bg-emerald-700 transition-all duration-500"
-                                                            style={{
-                                                                width: `${score}%`,
-                                                            }}
-                                                        />
-                                                    </div>
-                                                </div>
 
-                                            
-                                                <div className="mt-5 rounded-xl bg-[#F5F8F4] p-4">
-                                                    <h4 className="text-sm font-bold text-gray-800">
-                                                        💡 Why this destination?
-                                                    </h4>
+                                                        <h4 className="font-semibold text-slate-800">
+                                                            {place.name}
+                                                        </h4>
 
-                                                    <ul className="mt-3 space-y-2">
-                                                        {reasons.map(
-                                                            (reason, index) => {
-                                                                const doesNotMatch =
-                                                                    reason.startsWith(
-                                                                        "Exceeds"
-                                                                    ) ||
-                                                                    reason.startsWith(
-                                                                        "Below"
-                                                                    );
-
-                                                                return (
-                                                                    <li
-                                                                        key={index}
-                                                                        className="flex items-start gap-2 text-sm leading-5 text-gray-600"
-                                                                    >
-                                                                        <span
-                                                                            className={
-                                                                                doesNotMatch
-                                                                                    ? "font-bold text-amber-600"
-                                                                                    : "font-bold text-emerald-700"
-                                                                            }
-                                                                        >
-                                                                            {doesNotMatch
-                                                                                ? "!"
-                                                                                : "✓"}
-                                                                        </span>
-
-                                                                        <span>
-                                                                            {reason}
-                                                                        </span>
-                                                                    </li>
-                                                                );
-                                                            }
-                                                        )}
-                                                    </ul>
-                                                </div>
-
-                                        
-                                                <div className="mt-5 flex items-center justify-between gap-3 border-t border-gray-100 pt-4">
-                                                    <div>
-                                                        <p className="text-xs text-gray-500">
-                                                            Estimated budget
+                                                        <p className="text-sm text-slate-500 mt-1">
+                                                            {place.location}
                                                         </p>
 
-                                                        <p className="mt-1 text-lg font-bold text-gray-900">
-                                                            ₹
-                                                            {Number(
-                                                                destination.budget
-                                                            ).toLocaleString(
-                                                                "en-IN"
-                                                            )}
-                                                        </p>
                                                     </div>
 
-                                                    <Link
-                                                        to={`/destinations/${destinationId}`}
-                                                        className="rounded-xl bg-emerald-800 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-900"
-                                                    >
-                                                        View Details →
-                                                    </Link>
-                                                </div>
+                                                ))}
+
                                             </div>
-                                        </article>
-                                    );
-                                })}
+
+                                        ) : (
+
+                                            <p className="text-slate-500">
+                                                {day.message}
+                                            </p>
+
+                                        )}
+
+                                    </div>
+
+                                ))}
+
                             </div>
-                        )}
+
+                        </div>
+
+                        {/* COMPLETE PACKAGE PRICE */}
+
+                        <div className="bg-white rounded-3xl shadow-lg p-6 md:p-9">
+
+                            <h2 className="text-2xl font-bold text-slate-800">
+                                Complete Trip Package
+                            </h2>
+
+                            <p className="text-slate-500 mt-2 mb-7">
+                                Estimated expenses for your entire trip.
+                            </p>
+
+                            <div className="space-y-5">
+
+                                <div className="flex justify-between gap-4 border-b pb-4">
+
+                                    <span className="text-slate-600">
+                                        Bengaluru Round-trip Travel
+                                    </span>
+
+                                    <span className="font-semibold">
+                                        {formatPrice(packageDetails.bengaluruTravelCost)}
+                                    </span>
+
+                                </div>
+
+                                <div className="flex justify-between gap-4 border-b pb-4">
+
+                                    <span className="text-slate-600">
+                                        Local Transportation
+                                    </span>
+
+                                    <span className="font-semibold">
+                                        {formatPrice(packageDetails.localTransportCost)}
+                                    </span>
+
+                                </div>
+
+                                <div className="flex justify-between gap-4 border-b pb-4">
+
+                                    <span className="text-slate-600">
+                                        Food
+                                    </span>
+
+                                    <span className="font-semibold">
+                                        {formatPrice(packageDetails.foodCost)}
+                                    </span>
+
+                                </div>
+
+                                <div className="flex justify-between gap-4 border-b pb-4">
+
+                                    <span className="text-slate-600">
+                                        Accommodation ({packageDetails.nights} nights)
+                                    </span>
+
+                                    <span className="font-semibold">
+                                        {formatPrice(packageDetails.accommodationCost)}
+                                    </span>
+
+                                </div>
+
+                                <div className="flex justify-between gap-4 border-b pb-4">
+
+                                    <span className="text-slate-600">
+                                        Contingency (5%)
+                                    </span>
+
+                                    <span className="font-semibold">
+                                        {formatPrice(packageDetails.contingency)}
+                                    </span>
+
+                                </div>
+
+                                <div className="flex justify-between gap-4 border-b pb-4">
+
+                                    <span className="text-slate-600">
+                                        Subtotal
+                                    </span>
+
+                                    <span className="font-semibold">
+                                        {formatPrice(packageDetails.subtotal)}
+                                    </span>
+
+                                </div>
+
+                            </div>
+
+                            {/* TOTAL */}
+
+                            <div className="bg-blue-50 rounded-2xl p-6 mt-7">
+
+                                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+
+                                    <div>
+
+                                        <h3 className="text-lg font-bold text-slate-800">
+                                            Total Package Price
+                                        </h3>
+
+                                        <p className="text-sm text-slate-500 mt-2">
+                                            Price per person:{" "}
+                                            {formatPrice(packageDetails.perPersonTotal)}
+                                        </p>
+
+                                    </div>
+
+                                    <h2 className="text-3xl font-bold text-blue-700">
+                                        {formatPrice(packageDetails.total)}
+                                    </h2>
+
+                                </div>
+
+                            </div>
+
+                            <p className="text-sm text-slate-500 mt-5">
+                                Travel distance and package costs are estimates.
+                                Actual expenses may vary depending on routes,
+                                transportation, accommodation and food choices.
+                            </p>
+
+                            {/* BOOKING BUTTON */}
+
+                            <button
+                                onClick={handleBooking}
+                                className="w-full mt-7 bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl transition duration-200"
+                            >
+                                Book This Complete Trip
+                            </button>
+
+                        </div>
+
                     </div>
-                </section>
-            )}
 
-            {/* Initial state */}
-            {!searched && (
-                <section className="px-4 pb-16 sm:px-6">
-                    <div className="mx-auto max-w-3xl rounded-2xl border border-[#D5E3D5] bg-[#E8F0E8]/60 p-7 text-center sm:p-10">
-                        <div className="text-5xl">🌄</div>
+                )}
 
-                        <h2 className="mt-4 text-xl font-bold text-emerald-950">
-                            Your next adventure starts here
-                        </h2>
+            </div>
 
-                        <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-gray-600">
-                            Choose your favourite travel experiences and
-                            discover destinations that fit your budget.
-                        </p>
-                    </div>
-                </section>
-            )}
         </div>
+
     );
+
 }
 
 export default Recommendations;

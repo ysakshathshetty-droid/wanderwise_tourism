@@ -10,6 +10,8 @@ import DestinationDetails from './pages/Destinationdetails'
 import Recommendations from './pages/Recommendations'
 import Dashboard from './pages/Dashboard'
 import Profile from './pages/Profile'
+import BookingSuccess from './pages/BookingSuccess'
+import Paymnet from './pages/Payment'
 
 function App() {
  
@@ -26,6 +28,8 @@ function App() {
     <Route path='/recommendations' element={<Recommendations/>}/>
     <Route path="/dashboard"  element={<Dashboard/>}/>
     <Route path="/profile" element={<Profile/>}/>
+    <Route path="/booking-success" element={<BookingSuccess/>}/>
+    <Route path="/payment" element={<Paymnet/>}/>
   </Routes>
   </BrowserRouter>
   )
